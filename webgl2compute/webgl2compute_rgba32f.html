@@ -1,0 +1,118 @@
+<html><head>
+<title>WebGL2 compute RGBA32F</title>
+
+<script type="text/javascript">
+
+const CSs = `#version 310 es
+#define TS 1u
+layout (local_size_x = TS, local_size_y = TS, local_size_z = 1) in;
+precision highp float;
+  uniform highp sampler2D samp0;
+  uniform highp sampler2D samp1;
+  layout(rgba32f, binding = 0) writeonly uniform highp image2D outImg;
+void main(void) {
+  vec4 acc = vec4(0.0);
+  vec4 a = texelFetch(samp0, ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y), 0); 
+  vec4 b = texelFetch(samp1, ivec2(gl_GlobalInvocationID.x, gl_GlobalInvocationID.y), 0);
+  // Below equals a*b. Results: 5,12,21,32.
+  acc = a.xyzw*b.xyzw; 
+  // Results: 19,22,43,50.
+  //acc = (a.xxzz * b.xyxy) + (a.yyww * b.zwzw);
+  imageStore(outImg, ivec2(gl_GlobalInvocationID.xy), acc);
+}
+`;
+
+function createShader(gl, type, source){
+   var shader = gl.createShader(type);
+   gl.shaderSource(shader, source);
+   gl.compileShader(shader);
+   if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) return shader;
+   console.log(gl.getShaderInfoLog(shader));
+   gl.deleteShader(shader);
+}
+
+var gl, N = 1, size = 2;
+var textureA, textureB, textureFBO;
+var FBO;
+var TEXTURE_WIDTH = 1;
+var TEXTURE_HEIGHT = 1;
+var A = new Float32Array(size*size), 
+    B = new Float32Array(size*size),
+    C = new Float32Array(4);
+
+function generateTextures () {
+    for(i=0; i<size*size; i++) {
+        A[i] = 1.0*i+1.0;  
+        B[i] = 1.0*i+5.0;
+    }
+}
+
+function createTexture(active, data){
+   var tex = gl.createTexture();
+   gl.activeTexture(active);
+   gl.bindTexture(gl.TEXTURE_2D, tex);
+   gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, TEXTURE_WIDTH,TEXTURE_HEIGHT);
+   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0,0, TEXTURE_WIDTH,TEXTURE_HEIGHT, gl.RGBA, gl.FLOAT, data);
+   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+   return tex
+ }
+ 
+ function createFBOTexture(active){
+   var tex = gl.createTexture();
+   gl.activeTexture(active);
+   gl.bindTexture(gl.TEXTURE_2D, tex);
+   gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, TEXTURE_WIDTH,TEXTURE_WIDTH);
+   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+   return tex
+ }
+
+ function dispatchAndReadback(){
+  gl.dispatchCompute(1, 1, 1);
+
+  gl.readPixels(0,0, 1,1, gl.RGBA, gl.FLOAT, C);
+  document.getElementById('output').innerText = C.toString();
+}
+
+function main() {
+   var c = document.getElementById("canvas")
+   try { gl = c.getContext("webgl2-compute")
+   } catch(e) {}
+   if ( !gl ) {alert("Can't get WebGL 2 compute"); return}
+   var ext
+   try {
+     ext = gl.getExtension("EXT_color_buffer_float");
+   } catch(e) {}
+   if ( !ext ) {alert(err + "EXT_color_buffer_float"); return;}
+
+   var prog  = gl.createProgram()
+   gl.attachShader(prog, createShader( gl, gl.COMPUTE_SHADER, CSs))
+   gl.linkProgram(prog)
+   gl.useProgram(prog)
+
+   var sampLocation  = gl.getUniformLocation(prog, "samp1")
+   gl.uniform1i(sampLocation, 1)
+
+   generateTextures();
+   textureA = createTexture(gl.TEXTURE0, A)
+   textureB = createTexture(gl.TEXTURE1, B)
+   textureFBO = createFBOTexture(gl.TEXTURE2)
+   gl.bindImageTexture(0, textureFBO, 0, gl.FALSE, 0, gl.WRITE_ONLY, gl.RGBA32F);
+   FBO = gl.createFramebuffer()
+   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, FBO)
+   gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0,
+       gl.TEXTURE_2D, textureFBO, 0)
+   dispatchAndReadback();
+}
+
+</script>
+
+</head>
+<body onload="main()">
+<h1>WebGL2 compute RGBA32F</h1>
+<p><div id="output"></div>
+<br><canvas id="canvas" width="1" height="1"></canvas>
+</body>
+</html>
+
